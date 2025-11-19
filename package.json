@@ -1,6 +1,24 @@
 {
   "name": "site-failover-worker",
+  "version": "1.0.0",
+  "description": "A Cloudflare Worker that monitors website health and automatically manages redirect rules for failover scenarios",
   "type": "module",
+  "license": "MIT",
+  "author": "Aron Perauch",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aperauch/cloudflare-site-failover-worker.git"
+  },
+  "keywords": [
+    "cloudflare",
+    "worker",
+    "failover",
+    "monitoring",
+    "health-check",
+    "redirect",
+    "high-availability",
+    "durable-objects"
+  ],
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
