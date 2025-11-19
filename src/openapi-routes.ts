@@ -106,6 +106,26 @@ const ErrorResponseSchema = z.object({
 // Create OpenAPI app
 export const api = new OpenAPIHono<{ Bindings: Env }>();
 
+// Authentication middleware
+api.use('*', async (c, next) => {
+  // Skip auth for health endpoint and OpenAPI docs
+  if (c.req.path === '/health' || c.req.path === '/openapi.json' || c.req.path === '/ui' || c.req.path === '/') {
+    return next();
+  }
+  
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Unauthorized - Bearer token required' }, 401);
+  }
+  
+  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+  if (token !== c.env.API_TOKEN) {
+    return c.json({ error: 'Unauthorized - Invalid token' }, 401);
+  }
+  
+  return next();
+});
+
 // Register security scheme
 api.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
   type: 'http',
@@ -500,6 +520,40 @@ api.openapi(resetCountersRoute, async (c) => {
     return c.json({
       success: true,
       message: 'Counters reset successfully',
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Reset all metrics endpoint (for debugging)
+const resetAllMetricsRoute = createRoute({
+  method: 'post',
+  path: '/reset-all-metrics',
+  tags: ['Management'],
+  summary: 'Reset all metrics',
+  description: 'Resets failure/recovery counters AND all cumulative metrics (healthChecksTotal, etc). Use for testing/debugging only.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: SuccessResponseSchema,
+        },
+      },
+      description: 'All metrics reset',
+    },
+  },
+});
+
+api.openapi(resetAllMetricsRoute, async (c) => {
+  try {
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    await stateManager.resetAllMetrics();
+    
+    return c.json({
+      success: true,
+      message: 'All metrics reset successfully',
     });
   } catch (error: any) {
     return c.json({ error: error.message }, 500);

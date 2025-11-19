@@ -25,7 +25,7 @@
     "crons": ["* * * * *"]
   },
   "vars": {
-    "MONITOR_URL": "https://mock.aperauch.com/scenario/gradual-failure",
+    "MONITOR_URL": "https://mock.aperauch.com/scenario/flaky-api",
     "FAILURE_COUNT_THRESHOLD": "5",
     "RECOVERY_COUNT_THRESHOLD": "2",
     "TIMEOUT_SECONDS": "20",

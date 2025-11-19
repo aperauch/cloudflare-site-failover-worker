@@ -55,6 +55,18 @@ export class MonitorState implements DurableObject {
         const state = await this.getState();
         state.failureCount = 0;
         state.recoveryCount = 0;
+        // Preserve cumulative metrics - they should always accumulate
+        await this.setState(state);
+        return new Response(JSON.stringify(state), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Manual reset all metrics (for testing/debugging only)
+      if (method === 'POST' && url.pathname === '/reset-all-metrics') {
+        const state = await this.getState();
+        state.failureCount = 0;
+        state.recoveryCount = 0;
         state.healthChecksTotal = 0;
         state.successesTotal = 0;
         state.failuresTotal = 0;

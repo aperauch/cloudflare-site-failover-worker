@@ -46,6 +46,16 @@ export class StateManager {
     return await response.json();
   }
 
+  async resetAllMetrics(): Promise<MonitorStateData> {
+    const response = await this.durableObject.fetch('http://do/reset-all-metrics', {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to reset all metrics');
+    }
+    return await response.json();
+  }
+
   async updateRedirectRuleState(enabled: boolean, reason: string): Promise<MonitorStateData> {
     const response = await this.durableObject.fetch('http://do/update-redirect-rule-state', {
       method: 'POST',
