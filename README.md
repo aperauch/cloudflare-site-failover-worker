@@ -54,6 +54,8 @@ The deploy button will:
 - [Monitoring & Observability](#monitoring--observability)
 - [Security](#security)
 - [Troubleshooting](#troubleshooting)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ## Architecture
 
@@ -809,6 +811,72 @@ Export metrics to Prometheus via `/metrics` endpoint:
 - Verify scheduled maintenance window times are correct (ISO8601 format)
 - Review logs for maintenance mode actions
 
+## Disclaimer
+
+**IMPORTANT: READ CAREFULLY BEFORE USING THIS SOFTWARE**
+
+This software is provided as-is for monitoring and failover management purposes. By using this software, you acknowledge and agree to the following:
+
+### No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### Limitation of Liability
+
+**The authors and contributors of this software shall not be held liable for:**
+
+- Any website downtime, outages, or service interruptions
+- Failed health checks or missed failover events
+- Data loss or corruption
+- Business losses or lost revenue
+- Damages resulting from the use or inability to use this software
+- Any errors, bugs, or issues in the software
+- Incorrect redirect rule management
+- API failures or rate limiting issues
+- Any other direct, indirect, incidental, special, exemplary, or consequential damages
+
+### User Responsibility
+
+**By deploying and using this software, you agree that:**
+
+- You are solely responsible for testing and validating the software in your environment
+- You are responsible for monitoring the worker's operation and performance
+- You should implement redundant monitoring and alerting systems
+- You understand that automated failover systems may not be 100% reliable
+- You will not hold the authors liable for any issues arising from the use of this software
+- It is your responsibility to ensure business continuity and disaster recovery plans
+- You should thoroughly test all failover scenarios before relying on this software in production
+
+### Recommendation
+
+This software should be used as **one component** of a comprehensive monitoring and failover strategy. Do not rely solely on this worker for critical business operations. Always implement multiple layers of monitoring, alerting, and failover mechanisms.
+
+### Support
+
+This is open-source software provided free of charge with no guarantees or warranties. Support is provided on a best-effort basis through GitHub Issues. The authors are under no obligation to provide support, maintenance, or updates.
+
 ## License
 
-MIT
+MIT License
+
+Copyright (c) 2025 Aron Perauch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+See [LICENSE](./LICENSE) file for full details
