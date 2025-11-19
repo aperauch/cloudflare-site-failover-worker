@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "site-failover-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-11-13",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MONITOR_STATE",
+        "class_name": "MonitorState"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["MonitorState"]
+    }
+  ],
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "MONITOR_URL": "https://mock.aperauch.com/scenario/gradual-failure",
+    "FAILURE_COUNT_THRESHOLD": "5",
+    "RECOVERY_COUNT_THRESHOLD": "2",
+    "TIMEOUT_SECONDS": "20",
+    "REDIRECT_RULE_ID": "67796c2a709743aea8079936e5437883",
+    "ACCOUNT_ID": "5baed515fc52bac5d62bdccccfcd84cb",
+    "ZONE_ID": "2e4db964aed0ff2b29d68e57f3f373e1",
+    "LOG_LEVEL": "debug"
+  }
+  // Note: Set sensitive tokens via Wrangler secrets:
+  // wrangler secret put CLOUDFLARE_API_TOKEN
+  // wrangler secret put API_TOKEN
+}

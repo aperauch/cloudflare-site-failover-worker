@@ -1,0 +1,744 @@
+import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
+import type { Env, MaintenanceWindow } from './types';
+import { StateManager } from './state-manager';
+import { validateEnvironment } from './validation';
+import { CloudflareAPIClient } from './cloudflare-api';
+import { Logger } from './logger';
+
+// Schema definitions
+const StatusResponseSchema = z.object({
+  monitorUrl: z.string().describe('URL being monitored'),
+  failureCount: z.number().describe('Current consecutive failure count'),
+  recoveryCount: z.number().describe('Current consecutive recovery count'),
+  lastCheckTime: z.string().nullable().describe('ISO8601 timestamp of last health check'),
+  nextCheckTime: z.string().describe('ISO8601 timestamp of next scheduled check'),
+  redirectRuleEnabled: z.boolean().describe('Current state of redirect rule'),
+  maintenanceMode: z.boolean().describe('Whether maintenance mode is active'),
+  scheduledMaintenanceWindows: z.array(z.object({
+    id: z.string(),
+    startTime: z.string(),
+    endTime: z.string(),
+    reason: z.string().optional(),
+  })),
+  thresholds: z.object({
+    failureCountThreshold: z.number(),
+    recoveryCountThreshold: z.number(),
+    timeoutSeconds: z.number(),
+  }),
+});
+
+const HealthResponseSchema = z.object({
+  status: z.enum(['healthy', 'degraded', 'unhealthy']).describe('Worker health status'),
+  durableObjectsAvailable: z.boolean().describe('Whether Durable Objects are accessible'),
+  lastCronExecution: z.string().nullable().describe('ISO8601 timestamp of last cron execution'),
+  uptimeSeconds: z.number().describe('Worker uptime in seconds'),
+  error: z.string().optional(),
+});
+
+const RedirectRuleResponseSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  lastModified: z.string(),
+  lastChecked: z.string(),
+});
+
+const RedirectRuleHistorySchema = z.object({
+  history: z.array(z.object({
+    timestamp: z.string(),
+    event: z.enum(['enabled', 'disabled']),
+    reason: z.string(),
+    failureCount: z.number(),
+    recoveryCount: z.number(),
+  })),
+});
+
+const SuccessResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+});
+
+const SimulateResponseSchema = z.object({
+  success: z.boolean(),
+  newFailureCount: z.number().optional(),
+  newRecoveryCount: z.number().optional(),
+  message: z.string(),
+});
+
+const MaintenanceModeRequestSchema = z.object({
+  enabled: z.boolean(),
+  reason: z.string().optional(),
+});
+
+const MaintenanceModeResponseSchema = z.object({
+  success: z.boolean(),
+  maintenanceMode: z.boolean(),
+  message: z.string(),
+});
+
+const MaintenanceWindowRequestSchema = z.object({
+  startTime: z.string().describe('ISO8601 start time'),
+  endTime: z.string().describe('ISO8601 end time'),
+  reason: z.string().optional(),
+});
+
+const MaintenanceWindowResponseSchema = z.object({
+  success: z.boolean(),
+  windowId: z.string(),
+  startTime: z.string(),
+  endTime: z.string(),
+  message: z.string(),
+});
+
+const MaintenanceWindowsResponseSchema = z.object({
+  windows: z.array(z.object({
+    id: z.string(),
+    startTime: z.string(),
+    endTime: z.string(),
+    reason: z.string().optional(),
+    isActive: z.boolean(),
+  })),
+});
+
+const ErrorResponseSchema = z.object({
+  error: z.string(),
+});
+
+// Create OpenAPI app
+export const api = new OpenAPIHono<{ Bindings: Env }>();
+
+// Register security scheme
+api.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'string',
+  description: 'Enter your API token (matches API_TOKEN environment variable)',
+});
+
+// Health endpoint (no auth)
+const healthRoute = createRoute({
+  method: 'get',
+  path: '/health',
+  tags: ['Monitoring'],
+  summary: 'Get worker health status',
+  description: 'Returns operational health of the worker. No authentication required.',
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: HealthResponseSchema,
+        },
+      },
+      description: 'Health status',
+    },
+    503: {
+      content: {
+        'application/json': {
+          schema: HealthResponseSchema,
+        },
+      },
+      description: 'Service unavailable',
+    },
+  },
+});
+
+api.openapi(healthRoute, async (c) => {
+  try {
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    const state = await stateManager.getState();
+    
+    const now = new Date();
+    const uptimeSeconds = state.workerStartTime 
+      ? Math.floor((now.getTime() - new Date(state.workerStartTime).getTime()) / 1000)
+      : 0;
+    
+    const lastCronAge = state.lastCronExecution
+      ? Math.floor((now.getTime() - new Date(state.lastCronExecution).getTime()) / 1000)
+      : null;
+    
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    
+    if (!state.lastCronExecution) {
+      status = 'degraded';
+    } else if (lastCronAge && lastCronAge > 120) {
+      status = 'unhealthy';
+    }
+    
+    return c.json({
+      status,
+      durableObjectsAvailable: true,
+      lastCronExecution: state.lastCronExecution,
+      uptimeSeconds,
+    });
+  } catch (error: any) {
+    return c.json({
+      status: 'unhealthy' as const,
+      durableObjectsAvailable: false,
+      lastCronExecution: null,
+      uptimeSeconds: 0,
+      error: error.message,
+    }, 503);
+  }
+});
+
+// Status endpoint
+const statusRoute = createRoute({
+  method: 'get',
+  path: '/status',
+  tags: ['Monitoring'],
+  summary: 'Get monitoring status',
+  description: 'Returns current monitoring status including counters and thresholds.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: StatusResponseSchema,
+        },
+      },
+      description: 'Current status',
+    },
+    401: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Unauthorized',
+    },
+    500: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Internal error',
+    },
+  },
+});
+
+api.openapi(statusRoute, async (c) => {
+  try {
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    const state = await stateManager.getState();
+    
+    const config = validateEnvironment(c.env, new Logger());
+    
+    const now = new Date();
+    const nextCheckTime = state.lastCheckTime
+      ? new Date(new Date(state.lastCheckTime).getTime() + 60000).toISOString()
+      : new Date(now.getTime() + 60000).toISOString();
+    
+    return c.json({
+      monitorUrl: config.monitorUrl,
+      failureCount: state.failureCount,
+      recoveryCount: state.recoveryCount,
+      lastCheckTime: state.lastCheckTime,
+      nextCheckTime,
+      redirectRuleEnabled: state.redirectRuleEnabled,
+      maintenanceMode: state.maintenanceMode,
+      scheduledMaintenanceWindows: state.scheduledMaintenanceWindows,
+      thresholds: {
+        failureCountThreshold: config.failureCountThreshold,
+        recoveryCountThreshold: config.recoveryCountThreshold,
+        timeoutSeconds: config.timeoutSeconds,
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Metrics endpoint
+const MetricsResponseSchema = z.object({
+  healthChecksTotal: z.number().describe('Total number of health checks performed'),
+  successesTotal: z.number().describe('Total number of successful health checks'),
+  failuresTotal: z.number().describe('Total number of failures detected'),
+  redirectRuleChangesTotal: z.number().describe('Total number of redirect rule changes'),
+  apiErrorsTotal: z.number().describe('Total number of API errors'),
+});
+
+const metricsRoute = createRoute({
+  method: 'get',
+  path: '/metrics',
+  tags: ['Monitoring'],
+  summary: 'Get metrics',
+  description: 'Returns monitoring metrics in JSON format.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: MetricsResponseSchema,
+        },
+      },
+      description: 'Monitoring metrics',
+    },
+    401: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Unauthorized',
+    },
+  },
+});
+
+api.openapi(metricsRoute, async (c) => {
+  try {
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    const state = await stateManager.getState();
+    
+    return c.json({
+      healthChecksTotal: state.healthChecksTotal,
+      successesTotal: state.successesTotal,
+      failuresTotal: state.failuresTotal,
+      redirectRuleChangesTotal: state.redirectRuleChangesTotal,
+      apiErrorsTotal: state.apiErrorsTotal,
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Redirect rule endpoint
+const redirectRuleRoute = createRoute({
+  method: 'get',
+  path: '/redirect-rule',
+  tags: ['Redirect Rules'],
+  summary: 'Get redirect rule state',
+  description: 'Fetches current redirect rule state from Cloudflare API.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: RedirectRuleResponseSchema,
+        },
+      },
+      description: 'Redirect rule info',
+    },
+    401: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Unauthorized',
+    },
+    500: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Failed to fetch rule',
+    },
+  },
+});
+
+api.openapi(redirectRuleRoute, async (c) => {
+  try {
+    const config = validateEnvironment(c.env, new Logger());
+    const logger = new Logger(config.logLevel);
+    const apiClient = new CloudflareAPIClient(
+      config.cloudflareApiToken,
+      config.zoneId,
+      config.accountId,
+      logger
+    );
+    
+    const rule = await apiClient.getRedirectRule(config.redirectRuleId);
+    
+    if (!rule) {
+      return c.json({ error: 'Failed to fetch redirect rule' }, 500);
+    }
+    
+    return c.json({
+      id: rule.id,
+      status: rule.status,
+      lastModified: rule.lastModified,
+      lastChecked: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Redirect rule history endpoint
+const redirectRuleHistoryRoute = createRoute({
+  method: 'get',
+  path: '/redirect-rule-history',
+  tags: ['Redirect Rules'],
+  summary: 'Get redirect rule change history',
+  description: 'Returns last 50 redirect rule state changes.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: RedirectRuleHistorySchema,
+        },
+      },
+      description: 'Change history',
+    },
+  },
+});
+
+api.openapi(redirectRuleHistoryRoute, async (c) => {
+  try {
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    const state = await stateManager.getState();
+    
+    return c.json({
+      history: state.redirectRuleHistory,
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Simulate failover endpoint
+const simulateFailoverRoute = createRoute({
+  method: 'post',
+  path: '/simulate-failover',
+  tags: ['Testing'],
+  summary: 'Simulate failover',
+  description: 'Forces failure counter to threshold for testing purposes.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: SimulateResponseSchema,
+        },
+      },
+      description: 'Failover simulated',
+    },
+  },
+});
+
+api.openapi(simulateFailoverRoute, async (c) => {
+  try {
+    const config = validateEnvironment(c.env, new Logger());
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    
+    const state = await stateManager.simulateFailover(config.failureCountThreshold);
+    
+    return c.json({
+      success: true,
+      newFailureCount: state.failureCount,
+      message: `Failure counter set to ${state.failureCount}`,
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Simulate recovery endpoint
+const simulateRecoveryRoute = createRoute({
+  method: 'post',
+  path: '/simulate-recovery',
+  tags: ['Testing'],
+  summary: 'Simulate recovery',
+  description: 'Forces recovery counter to threshold for testing purposes.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: SimulateResponseSchema,
+        },
+      },
+      description: 'Recovery simulated',
+    },
+  },
+});
+
+api.openapi(simulateRecoveryRoute, async (c) => {
+  try {
+    const config = validateEnvironment(c.env, new Logger());
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    
+    const state = await stateManager.simulateRecovery(config.recoveryCountThreshold);
+    
+    return c.json({
+      success: true,
+      newRecoveryCount: state.recoveryCount,
+      message: `Recovery counter set to ${state.recoveryCount}`,
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Reset counters endpoint
+const resetCountersRoute = createRoute({
+  method: 'post',
+  path: '/reset-counters',
+  tags: ['Management'],
+  summary: 'Reset counters',
+  description: 'Resets failure and recovery counters to 0.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: SuccessResponseSchema,
+        },
+      },
+      description: 'Counters reset',
+    },
+  },
+});
+
+api.openapi(resetCountersRoute, async (c) => {
+  try {
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    await stateManager.resetCounters();
+    
+    return c.json({
+      success: true,
+      message: 'Counters reset successfully',
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Maintenance mode endpoint
+const maintenanceModeRoute = createRoute({
+  method: 'post',
+  path: '/maintenance-mode',
+  tags: ['Maintenance'],
+  summary: 'Set maintenance mode',
+  description: 'Enable or disable maintenance mode.',
+  security: [{ Bearer: [] }],
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: MaintenanceModeRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: MaintenanceModeResponseSchema,
+        },
+      },
+      description: 'Maintenance mode updated',
+    },
+    400: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Invalid request',
+    },
+  },
+});
+
+api.openapi(maintenanceModeRoute, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { enabled, reason } = body;
+    
+    if (typeof enabled !== 'boolean') {
+      return c.json({ error: 'enabled must be a boolean' }, 400);
+    }
+    
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    const state = await stateManager.setMaintenanceMode(enabled, reason);
+    
+    return c.json({
+      success: true,
+      maintenanceMode: state.maintenanceMode,
+      message: enabled ? 'Maintenance mode enabled' : 'Maintenance mode disabled',
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Add maintenance window endpoint
+const addMaintenanceWindowRoute = createRoute({
+  method: 'post',
+  path: '/maintenance-window',
+  tags: ['Maintenance'],
+  summary: 'Schedule maintenance window',
+  description: 'Schedule a maintenance window during which redirect rule changes are blocked.',
+  security: [{ Bearer: [] }],
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: MaintenanceWindowRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: MaintenanceWindowResponseSchema,
+        },
+      },
+      description: 'Maintenance window scheduled',
+    },
+    400: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Invalid request',
+    },
+  },
+});
+
+api.openapi(addMaintenanceWindowRoute, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { startTime, endTime, reason } = body;
+    
+    if (!startTime || !endTime) {
+      return c.json({ error: 'startTime and endTime are required' }, 400);
+    }
+    
+    const window: MaintenanceWindow = {
+      id: crypto.randomUUID(),
+      startTime,
+      endTime,
+      reason,
+    };
+    
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    await stateManager.addMaintenanceWindow(window);
+    
+    return c.json({
+      success: true,
+      windowId: window.id,
+      startTime: window.startTime,
+      endTime: window.endTime,
+      message: 'Maintenance window scheduled',
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Get maintenance windows endpoint
+const getMaintenanceWindowsRoute = createRoute({
+  method: 'get',
+  path: '/maintenance-windows',
+  tags: ['Maintenance'],
+  summary: 'Get maintenance windows',
+  description: 'Returns all scheduled maintenance windows.',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: MaintenanceWindowsResponseSchema,
+        },
+      },
+      description: 'Maintenance windows',
+    },
+  },
+});
+
+api.openapi(getMaintenanceWindowsRoute, async (c) => {
+  try {
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    const state = await stateManager.getState();
+    
+    const now = new Date();
+    const windows = state.scheduledMaintenanceWindows.map(w => ({
+      ...w,
+      isActive: now >= new Date(w.startTime) && now <= new Date(w.endTime),
+    }));
+    
+    return c.json({ windows });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Delete maintenance window endpoint
+const deleteMaintenanceWindowRoute = createRoute({
+  method: 'delete',
+  path: '/maintenance-window/{windowId}',
+  tags: ['Maintenance'],
+  summary: 'Cancel maintenance window',
+  description: 'Cancels a scheduled maintenance window.',
+  security: [{ Bearer: [] }],
+  request: {
+    params: z.object({
+      windowId: z.string(),
+    }),
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: SuccessResponseSchema,
+        },
+      },
+      description: 'Maintenance window cancelled',
+    },
+  },
+});
+
+api.openapi(deleteMaintenanceWindowRoute, async (c) => {
+  try {
+    const { windowId } = c.req.param();
+    
+    const stateManager = new StateManager(c.env.MONITOR_STATE);
+    await stateManager.deleteMaintenanceWindow(windowId);
+    
+    return c.json({
+      success: true,
+      message: 'Maintenance window cancelled',
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Configure OpenAPI documentation
+api.doc('/openapi.json', (c) => {
+  const url = new URL(c.req.url);
+  const baseUrl = `${url.protocol}//${url.host}`;
+  
+  return {
+    openapi: '3.0.0',
+    info: {
+      version: '1.0.0',
+      title: 'Site Failover Worker API',
+      description: 'Automated website health monitoring and failover management system for Cloudflare',
+    },
+    servers: [
+      {
+        url: baseUrl,
+        description: url.hostname === 'localhost' ? 'Local development' : 'Production',
+      },
+    ],
+    tags: [
+      { name: 'Monitoring', description: 'Health and status monitoring' },
+      { name: 'Redirect Rules', description: 'Cloudflare redirect rule management' },
+      { name: 'Testing', description: 'Testing and simulation endpoints' },
+      { name: 'Management', description: 'Counter and state management' },
+      { name: 'Maintenance', description: 'Maintenance mode management' },
+    ],
+  };
+});
+
+export function getOpenAPIApp() {
+  return api;
+}
