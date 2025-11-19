@@ -2,6 +2,21 @@
 
 A Cloudflare Worker that monitors website health and automatically manages redirect rules for failover scenarios. Built with Hono framework and TypeScript.
 
+## Quick Deploy
+
+Deploy this Worker to your Cloudflare account with one click:
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/aperauch/cloudflare-site-failover-worker)
+
+The deploy button will:
+- Clone the repository to your GitHub account
+- Create a new Cloudflare Worker
+- Provision the required Durable Object
+- Set up the cron trigger for health checks
+- Prompt you to configure environment variables and secrets
+
+> **Note:** You'll need to complete the prerequisite setup below before the worker can function properly.
+
 ## Features
 
 - **Automated Health Monitoring**: Checks target URL every minute via cron trigger
@@ -16,6 +31,26 @@ A Cloudflare Worker that monitors website health and automatically manages redir
 - **Configurable Logging**: Debug, info, warn, and error log levels
 - **Retry Logic**: Exponential backoff for Cloudflare API calls
 - **Error Handling**: Graceful degradation and comprehensive error handling
+
+## Table of Contents
+
+- [Quick Deploy](#quick-deploy)
+- [Features](#features)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Step 1: Create a Redirect Rule](#step-1-create-a-redirect-rule)
+  - [Step 2: Create API Token](#step-2-create-api-token)
+  - [Step 3: Get Your Cloudflare IDs](#step-3-get-your-cloudflare-ids)
+  - [Step 4: Deploy the Worker](#step-4-deploy-the-worker)
+  - [Step 5: Configure Secrets](#step-5-configure-secrets)
+  - [Step 6: Verify Deployment](#step-6-verify-deployment)
+- [Configuration](#configuration)
+- [API Endpoints](#api-endpoints)
+- [Development](#development)
+- [How It Works](#how-it-works)
+- [Monitoring & Observability](#monitoring--observability)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
 
 ## Architecture
 
@@ -50,9 +85,210 @@ A Cloudflare Worker that monitors website health and automatically manages redir
 └─────────────────────────────┘
 ```
 
-## Environment Variables
+## Getting Started
 
-All environment variables must be configured in your `wrangler.toml` or via Cloudflare Dashboard:
+### Prerequisites
+
+Before deploying the worker, you'll need:
+
+1. **Cloudflare Account** with:
+   - Active zone (domain)
+   - Workers and Durable Objects enabled (Free plan works)
+   - A website to monitor
+
+2. **Cloudflare Redirect Rule** set up to redirect traffic to your failover site
+
+3. **Cloudflare API Token** with permissions to manage redirect rules
+
+4. **Local Development** (optional):
+   - Node.js 18+
+   - npm or yarn
+   - Git
+
+### Step 1: Create a Redirect Rule
+
+First, create a redirect rule that will be toggled by this worker:
+
+1. Go to **Cloudflare Dashboard** → Select your domain
+2. Navigate to **Rules** → **Redirect Rules**
+3. Click **Create rule**
+4. Configure your failover redirect:
+   - **Rule name**: `Failover to Backup Site`
+   - **When incoming requests match**: 
+     - Field: `Hostname`
+     - Operator: `equals`
+     - Value: `yourdomain.com`
+   - **Then**: `Dynamic` redirect
+   - **URL**: Your failover site URL (e.g., `https://backup.yourdomain.com`)
+   - **Status code**: `302` (Temporary Redirect)
+   - **Preserve query string**: Enabled (recommended)
+5. Click **Save**
+6. **Important**: Disable the rule immediately after creation (toggle off)
+7. Copy the **Rule ID** from the URL or rule list
+
+### Step 2: Create API Token
+
+Create an API token with permissions to manage redirect rules:
+
+1. Go to **Cloudflare Dashboard** → **My Profile** → **API Tokens**
+2. Click **Create Token**
+3. Select **Custom token** template
+4. Configure permissions:
+   - **Permissions**:
+     - `Account` → `Account Rulesets` → `Edit`
+   - **Account Resources**:
+     - Include → Specific account → Select your account
+   - **Zone Resources**:
+     - Include → Specific zone → Select your domain
+5. Click **Continue to summary** → **Create Token**
+6. **Save this token securely** - you'll need it later
+
+### Step 3: Get Your Cloudflare IDs
+
+Collect the following IDs from your Cloudflare dashboard:
+
+**Account ID:**
+1. Go to **Cloudflare Dashboard**
+2. Select any domain
+3. Scroll down on the Overview page
+4. Copy the **Account ID** from the right sidebar
+
+**Zone ID:**
+1. Go to **Cloudflare Dashboard** → Select your domain
+2. Scroll down on the Overview page
+3. Copy the **Zone ID** from the right sidebar
+
+**Redirect Rule ID:**
+- You copied this in Step 1 when creating the redirect rule
+- Or find it at: **Rules** → **Redirect Rules** → Click your rule → Copy from URL
+
+### Step 4: Deploy the Worker
+
+**Option A: Deploy via Button (Recommended)**
+
+1. Click the [Deploy to Cloudflare](#quick-deploy) button above
+2. Authorize Cloudflare to access your GitHub account
+3. Configure the deployment:
+   - **Repository name**: Choose a name (default: `cloudflare-site-failover-worker`)
+   - **Worker name**: Choose a name (default: `site-failover-worker`)
+4. Configure environment variables when prompted:
+   - `MONITOR_URL`: Your website URL to monitor (must be HTTPS)
+   - `FAILURE_COUNT_THRESHOLD`: Number of consecutive failures before failover (e.g., `3`)
+   - `RECOVERY_COUNT_THRESHOLD`: Number of consecutive successes before recovery (e.g., `2`)
+   - `TIMEOUT_SECONDS`: Request timeout in seconds (e.g., `10`)
+   - `REDIRECT_RULE_ID`: From Step 1
+   - `ACCOUNT_ID`: From Step 3
+   - `ZONE_ID`: From Step 3
+   - `LOG_LEVEL`: `debug` or `info` (default: `debug`)
+5. Configure secrets when prompted:
+   - `CLOUDFLARE_API_TOKEN`: From Step 2
+   - `API_TOKEN`: Generate a secure random token (e.g., using `openssl rand -hex 32`)
+6. Click **Deploy**
+
+**Option B: Manual Deployment**
+
+1. Clone the repository:
+```bash
+git clone https://github.com/aperauch/cloudflare-site-failover-worker.git
+cd cloudflare-site-failover-worker
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Update `wrangler.jsonc` with your values:
+```jsonc
+{
+  "vars": {
+    "MONITOR_URL": "https://yourdomain.com",
+    "FAILURE_COUNT_THRESHOLD": "3",
+    "RECOVERY_COUNT_THRESHOLD": "2",
+    "TIMEOUT_SECONDS": "10",
+    "REDIRECT_RULE_ID": "your-redirect-rule-id",
+    "ACCOUNT_ID": "your-account-id",
+    "ZONE_ID": "your-zone-id",
+    "LOG_LEVEL": "info"
+  }
+}
+```
+
+4. Deploy:
+```bash
+npm run deploy
+```
+
+### Step 5: Configure Secrets
+
+Set the required secrets using Wrangler CLI:
+
+```bash
+# Set Cloudflare API Token (from Step 2)
+wrangler secret put CLOUDFLARE_API_TOKEN
+# Paste your token when prompted
+
+# Set API Token for worker authentication
+wrangler secret put API_TOKEN
+# Generate and paste a secure token: openssl rand -hex 32
+```
+
+**Generate a secure API token:**
+```bash
+# On macOS/Linux:
+openssl rand -hex 32
+
+# Or use Node.js:
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Step 6: Verify Deployment
+
+1. **Check worker health:**
+```bash
+curl https://your-worker.your-subdomain.workers.dev/health
+```
+
+Expected response:
+```json
+{
+  "status": "healthy",
+  "durableObjectsAvailable": true,
+  "lastCronExecution": "2024-01-15T10:30:00Z",
+  "uptimeSeconds": 60
+}
+```
+
+2. **Check monitoring status:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_TOKEN" \
+  https://your-worker.your-subdomain.workers.dev/status
+```
+
+3. **View logs:**
+```bash
+wrangler tail
+```
+
+4. **Test failover** (optional):
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  https://your-worker.your-subdomain.workers.dev/simulate-failover
+```
+
+This will trigger the redirect rule to enable. Check your website to confirm the redirect works, then reset:
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  https://your-worker.your-subdomain.workers.dev/reset-counters
+```
+
+## Configuration
+
+### Environment Variables
+
+All environment variables must be configured in your `wrangler.jsonc` or via Cloudflare Dashboard:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -291,59 +527,58 @@ Cancels a scheduled maintenance window.
 }
 ```
 
-## Quick Deploy
-
-Deploy this Worker to your Cloudflare account with one click:
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/YOUR_USERNAME/site-failover-worker)
-
-> **Note:** Replace `YOUR_USERNAME` with your GitHub username before sharing this button. After deployment, you'll need to configure the required environment variables and secrets.
-
 ## Development
 
-### Prerequisites
+### Local Development Setup
 
-- Node.js 18+
-- npm or yarn
-- Cloudflare account with Workers and Durable Objects enabled
+For local development and testing:
 
-### Installation
-
+1. **Clone and install:**
 ```bash
+git clone https://github.com/aperauch/cloudflare-site-failover-worker.git
+cd cloudflare-site-failover-worker
 npm install
 ```
 
-### Local Development
-
+2. **Create local environment file:**
 ```bash
-npm run dev
+cp .env.example .env
+# Edit .env with your local development values
 ```
 
-This starts a local development server with hot reload.
-
-### Type Generation
-
-Generate TypeScript types for Cloudflare bindings:
-
+3. **Generate TypeScript types:**
 ```bash
 npm run cf-typegen
 ```
 
-### Deployment
-
+4. **Start development server:**
 ```bash
-npm run deploy
+npm run dev
 ```
 
-This deploys the worker to Cloudflare with minification enabled.
+This starts a local server with hot reload at `http://localhost:8787`.
 
-### Setting Secrets
+### Available Scripts
 
-Use Wrangler CLI to set sensitive environment variables:
+- `npm run dev` - Start local development server
+- `npm run deploy` - Deploy to Cloudflare (with minification)
+- `npm run cf-typegen` - Generate TypeScript types for bindings
+
+### Testing Locally
+
+Test endpoints locally:
 
 ```bash
-wrangler secret put CLOUDFLARE_API_TOKEN
-wrangler secret put API_TOKEN
+# Health check (no auth required)
+curl http://localhost:8787/health
+
+# Status (requires auth)
+curl -H "Authorization: Bearer YOUR_API_TOKEN" \
+  http://localhost:8787/status
+
+# Simulate failover
+curl -X POST -H "Authorization: Bearer YOUR_API_TOKEN" \
+  http://localhost:8787/simulate-failover
 ```
 
 ## How It Works
