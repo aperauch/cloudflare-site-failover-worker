@@ -7,13 +7,13 @@ import { Logger } from './logger';
 
 // Schema definitions
 const StatusResponseSchema = z.object({
-  monitorUrl: z.string().describe('URL being monitored'),
-  failureCount: z.number().describe('Current consecutive failure count'),
-  recoveryCount: z.number().describe('Current consecutive recovery count'),
-  lastCheckTime: z.string().nullable().describe('ISO8601 timestamp of last health check'),
-  nextCheckTime: z.string().describe('ISO8601 timestamp of next scheduled check'),
-  redirectRuleEnabled: z.boolean().describe('Current state of redirect rule'),
-  maintenanceMode: z.boolean().describe('Whether maintenance mode is active'),
+  monitorUrl: z.string().describe('URL being monitored for health checks'),
+  failureCount: z.number().describe('Current consecutive failures (resets to 0 after redirect rule is enabled or after recovery)'),
+  recoveryCount: z.number().describe('Current consecutive successes (resets to 0 after redirect rule is disabled or after failure)'),
+  lastCheckTime: z.string().nullable().describe('ISO8601 timestamp of last health check execution'),
+  nextCheckTime: z.string().describe('ISO8601 timestamp of next scheduled cron execution'),
+  redirectRuleEnabled: z.boolean().describe('Current state of redirect rule (true = enabled/active, false = disabled/inactive)'),
+  maintenanceMode: z.boolean().describe('Whether immediate maintenance mode is currently active (bypasses health checks)'),
   scheduledMaintenanceWindows: z.array(z.object({
     id: z.string(),
     startTime: z.string(),
@@ -36,10 +36,10 @@ const HealthResponseSchema = z.object({
 });
 
 const RedirectRuleResponseSchema = z.object({
-  id: z.string(),
-  status: z.string(),
-  lastModified: z.string(),
-  lastChecked: z.string(),
+  id: z.string().describe('Cloudflare rule ID'),
+  status: z.enum(['active', 'inactive']).describe('Current rule status: active (enabled) or inactive (disabled)'),
+  lastModified: z.string().describe('ISO8601 timestamp when rule was last modified in Cloudflare'),
+  lastChecked: z.string().describe('ISO8601 timestamp when this status was fetched'),
 });
 
 const RedirectRuleHistorySchema = z.object({
@@ -270,19 +270,19 @@ api.openapi(statusRoute, async (c) => {
 
 // Metrics endpoint
 const MetricsResponseSchema = z.object({
-  healthChecksTotal: z.number().describe('Total number of health checks performed'),
-  successesTotal: z.number().describe('Total number of successful health checks'),
-  failuresTotal: z.number().describe('Total number of failures detected'),
-  redirectRuleChangesTotal: z.number().describe('Total number of redirect rule changes'),
-  apiErrorsTotal: z.number().describe('Total number of API errors'),
+  healthChecksTotal: z.number().describe('Cumulative count of all health checks performed since deployment'),
+  successesTotal: z.number().describe('Cumulative count of successful health checks (target responded with 2xx status)'),
+  failuresTotal: z.number().describe('Cumulative count of failed health checks (timeouts, errors, non-2xx responses)'),
+  redirectRuleChangesTotal: z.number().describe('Cumulative count of redirect rule enable/disable operations'),
+  apiErrorsTotal: z.number().describe('Cumulative count of Cloudflare API errors encountered'),
 });
 
 const metricsRoute = createRoute({
   method: 'get',
   path: '/metrics',
   tags: ['Monitoring'],
-  summary: 'Get metrics',
-  description: 'Returns monitoring metrics in JSON format.',
+  summary: 'Get cumulative metrics',
+  description: 'Returns cumulative monitoring metrics tracked since deployment. These counters continuously increment and are persisted in Durable Objects. Use /reset-all-metrics to reset for testing.',
   security: [{ Bearer: [] }],
   responses: {
     200: {
@@ -326,8 +326,8 @@ const redirectRuleRoute = createRoute({
   method: 'get',
   path: '/redirect-rule',
   tags: ['Redirect Rules'],
-  summary: 'Get redirect rule state',
-  description: 'Fetches current redirect rule state from Cloudflare API.',
+  summary: 'Get redirect rule status',
+  description: 'Fetches the current redirect rule state directly from Cloudflare API. Returns real-time status including whether the rule is currently active (enabled) or inactive (disabled), the rule ID, and when it was last modified.',
   security: [{ Bearer: [] }],
   responses: {
     200: {
@@ -423,8 +423,8 @@ const simulateFailoverRoute = createRoute({
   method: 'post',
   path: '/simulate-failover',
   tags: ['Testing'],
-  summary: 'Simulate failover',
-  description: 'Forces failure counter to threshold for testing purposes.',
+  summary: 'Simulate failover (enable redirect rule)',
+  description: 'Immediately enables the redirect rule via Cloudflare API to simulate a failover scenario. Use this to test your failover configuration without waiting for actual failures. Resets failure/recovery counters after successful activation.',
   security: [{ Bearer: [] }],
   responses: {
     200: {
@@ -486,8 +486,8 @@ const simulateRecoveryRoute = createRoute({
   method: 'post',
   path: '/simulate-recovery',
   tags: ['Testing'],
-  summary: 'Simulate recovery',
-  description: 'Forces recovery counter to threshold for testing purposes.',
+  summary: 'Simulate recovery (disable redirect rule)',
+  description: 'Immediately disables the redirect rule via Cloudflare API to simulate a recovery scenario. Use this to test recovery behavior without waiting for successful health checks. Resets failure/recovery counters after successful deactivation.',
   security: [{ Bearer: [] }],
   responses: {
     200: {
@@ -549,8 +549,8 @@ const resetCountersRoute = createRoute({
   method: 'post',
   path: '/reset-counters',
   tags: ['Management'],
-  summary: 'Reset counters',
-  description: 'Resets failure and recovery counters to 0.',
+  summary: 'Reset failure and recovery counters',
+  description: 'Resets ONLY the consecutive failure and recovery counters to zero. All cumulative metrics (healthChecksTotal, successesTotal, etc.) are preserved and continue accumulating. Use this to clear consecutive counters without losing historical data.',
   security: [{ Bearer: [] }],
   responses: {
     200: {
@@ -583,8 +583,8 @@ const resetAllMetricsRoute = createRoute({
   method: 'post',
   path: '/reset-all-metrics',
   tags: ['Management'],
-  summary: 'Reset all metrics',
-  description: 'Resets failure/recovery counters AND all cumulative metrics (healthChecksTotal, etc). Use for testing/debugging only.',
+  summary: 'Reset all metrics (testing only)',
+  description: 'Resets EVERYTHING: consecutive counters AND all cumulative metrics (healthChecksTotal, successesTotal, failuresTotal, redirectRuleChangesTotal, apiErrorsTotal) back to zero. ⚠️ WARNING: This erases all historical metric data. Use only for testing or debugging purposes.',
   security: [{ Bearer: [] }],
   responses: {
     200: {
