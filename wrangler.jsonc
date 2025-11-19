@@ -25,14 +25,14 @@
     "crons": ["* * * * *"]
   },
   "vars": {
-    "MONITOR_URL": "https://mock.aperauch.com/scenario/flaky-api",
-    "FAILURE_COUNT_THRESHOLD": "5",
+    "MONITOR_URL": "https://yourtargetdomain.com",
+    "FAILURE_COUNT_THRESHOLD": "3",
     "RECOVERY_COUNT_THRESHOLD": "2",
-    "TIMEOUT_SECONDS": "20",
-    "REDIRECT_RULE_ID": "67796c2a709743aea8079936e5437883",
-    "ACCOUNT_ID": "5baed515fc52bac5d62bdccccfcd84cb",
-    "ZONE_ID": "2e4db964aed0ff2b29d68e57f3f373e1",
-    "LOG_LEVEL": "debug"
+    "TIMEOUT_SECONDS": "10",
+    "REDIRECT_RULE_ID": "your-redirect-rule-id-here",
+    "ACCOUNT_ID": "your-cloudflare-account-id-here",
+    "ZONE_ID": "your-cloudflare-zone-id-here",
+    "LOG_LEVEL": "info"
   }
   // Note: Set sensitive tokens via Wrangler secrets:
   // wrangler secret put CLOUDFLARE_API_TOKEN
