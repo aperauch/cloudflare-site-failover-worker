@@ -42,11 +42,19 @@ export class CloudflareAPIClient {
 
       const data: any = await response.json();
       
+      // The ruleset contains an array of rules - we need to check the first rule's enabled status
+      if (!data.result?.rules || data.result.rules.length === 0) {
+        this.logger.warn('No rules found in ruleset');
+        return null;
+      }
+      
+      const rule = data.result.rules[0];
+      
       return {
-        id: data.result.id,
-        enabled: data.result.phase === 'http_request_dynamic_redirect',
-        status: data.result.phase === 'http_request_dynamic_redirect' ? 'active' : 'inactive',
-        lastModified: data.result.last_updated || new Date().toISOString(),
+        id: rule.id,
+        enabled: rule.enabled === true,
+        status: rule.enabled ? 'active' : 'inactive',
+        lastModified: rule.last_updated || new Date().toISOString(),
       };
     } catch (error: any) {
       this.logger.error('Failed to fetch redirect rule', { error: error.message });

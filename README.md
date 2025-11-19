@@ -46,6 +46,7 @@ The deploy button will:
   - [Step 5: Configure Secrets](#step-5-configure-secrets)
   - [Step 6: Verify Deployment](#step-6-verify-deployment)
 - [Configuration](#configuration)
+  - [Custom Domains (Optional)](#custom-domains-optional)
 - [API Endpoints](#api-endpoints)
   - [Interactive Documentation](#interactive-documentation)
 - [Development](#development)
@@ -330,6 +331,93 @@ ZONE_ID = "your-zone-id"
 # wrangler secret put API_TOKEN
 ```
 
+### Custom Domains (Optional)
+
+By default, your worker is accessible at `https://your-worker-name.your-subdomain.workers.dev`. You can optionally add a custom domain for a more professional URL.
+
+#### Option 1: Cloudflare Dashboard (Recommended)
+
+The easiest way to add a custom domain:
+
+1. Go to **Cloudflare Dashboard** → **Workers & Pages**
+2. Click on your worker name
+3. Go to **Triggers** tab
+4. Scroll to **Custom Domains** section
+5. Click **Add Custom Domain**
+6. Enter your domain (e.g., `monitor.yourdomain.com`)
+7. Click **Add Custom Domain**
+
+Cloudflare will automatically:
+- Create the necessary DNS records
+- Provision SSL certificates
+- Route traffic to your worker
+
+**Requirements:**
+- Domain must be active in your Cloudflare account
+- DNS must be proxied through Cloudflare (orange cloud ☁️)
+
+#### Option 2: Wrangler Configuration
+
+Add custom domains via `wrangler.jsonc`:
+
+1. **Edit `wrangler.jsonc`** and uncomment the routes section:
+
+```jsonc
+{
+  "routes": [
+    {
+      "pattern": "monitor.yourdomain.com/*",
+      "zone_name": "yourdomain.com"
+    }
+  ]
+}
+```
+
+2. **Deploy the worker:**
+
+```bash
+npm run deploy
+```
+
+**Multiple routes example:**
+
+```jsonc
+{
+  "routes": [
+    {
+      "pattern": "monitor.yourdomain.com/*",
+      "zone_name": "yourdomain.com"
+    },
+    {
+      "pattern": "api.yourdomain.com/health/*",
+      "zone_name": "yourdomain.com"
+    }
+  ]
+}
+```
+
+#### Option 3: Wrangler CLI
+
+Deploy with routes directly via command line:
+
+```bash
+wrangler deploy --route "monitor.yourdomain.com/*" --route "yourdomain.com/api/*"
+```
+
+#### Verify Custom Domain
+
+After configuring your custom domain:
+
+```bash
+# Test with custom domain
+curl https://monitor.yourdomain.com/health
+
+# Original workers.dev URL still works
+curl https://your-worker.your-subdomain.workers.dev/health
+```
+
+> **Note:** Both URLs remain active unless you explicitly disable the `workers.dev` route in the Cloudflare Dashboard.
+
 ## API Endpoints
 
 ### Interactive Documentation
@@ -338,6 +426,7 @@ The worker includes a beautiful, modern API documentation interface powered by [
 
 **Access the interactive docs:**
 - **Production**: `https://your-worker.your-subdomain.workers.dev/ui`
+- **Custom Domain**: `https://your-custom-domain.com/ui` (if configured)
 - **Local Development**: `http://localhost:8787/ui`
 
 The Scalar UI provides:

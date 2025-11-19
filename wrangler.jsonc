@@ -18,14 +18,27 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_classes": ["MonitorState"]
+      "new_classes": [
+        "MonitorState"
+      ]
     }
   ],
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": [
+      "* * * * *"
+    ]
   },
+  // Custom domain configuration (optional - configure after deployment)
+  // Uncomment and update with your domain, then redeploy:
+  // "routes": [
+  //   {
+  //     "pattern": "worker-name.yourdomain.com/*",
+  //     "zone_name": "yourdomain.com"
+  //   }
+  // ],
+  // Alternative: Configure via Cloudflare Dashboard → Workers → Triggers → Custom Domains
   "vars": {
-    "MONITOR_URL": "https://yourtargetdomain.com",
+    "MONITOR_URL": "https://yourdomain.com",
     "FAILURE_COUNT_THRESHOLD": "3",
     "RECOVERY_COUNT_THRESHOLD": "2",
     "TIMEOUT_SECONDS": "10",

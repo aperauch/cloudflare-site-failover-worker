@@ -440,16 +440,42 @@ const simulateFailoverRoute = createRoute({
 
 api.openapi(simulateFailoverRoute, async (c) => {
   try {
-    const config = validateEnvironment(c.env, new Logger());
+    const logger = new Logger((c.env.LOG_LEVEL || 'info') as any);
+    const config = validateEnvironment(c.env, logger);
     const stateManager = new StateManager(c.env.MONITOR_STATE);
     
+    // Set failure counter to threshold
     const state = await stateManager.simulateFailover(config.failureCountThreshold);
     
-    return c.json({
-      success: true,
-      newFailureCount: state.failureCount,
-      message: `Failure counter set to ${state.failureCount}`,
-    });
+    // Actually enable the redirect rule via API
+    const apiClient = new CloudflareAPIClient(
+      config.cloudflareApiToken,
+      config.zoneId,
+      config.accountId,
+      logger
+    );
+    
+    const success = await apiClient.updateRedirectRule(config.redirectRuleId, true);
+    
+    if (success) {
+      await stateManager.updateRedirectRuleState(
+        true,
+        'Simulated failover - manually triggered via API'
+      );
+      await stateManager.resetCounters();
+      
+      return c.json({
+        success: true,
+        newFailureCount: 0,
+        message: 'Redirect rule enabled successfully',
+      });
+    } else {
+      await stateManager.incrementApiErrors();
+      return c.json({
+        success: false,
+        message: 'Failed to enable redirect rule via Cloudflare API',
+      }, 500);
+    }
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
@@ -477,16 +503,42 @@ const simulateRecoveryRoute = createRoute({
 
 api.openapi(simulateRecoveryRoute, async (c) => {
   try {
-    const config = validateEnvironment(c.env, new Logger());
+    const logger = new Logger((c.env.LOG_LEVEL || 'info') as any);
+    const config = validateEnvironment(c.env, logger);
     const stateManager = new StateManager(c.env.MONITOR_STATE);
     
+    // Set recovery counter to threshold
     const state = await stateManager.simulateRecovery(config.recoveryCountThreshold);
     
-    return c.json({
-      success: true,
-      newRecoveryCount: state.recoveryCount,
-      message: `Recovery counter set to ${state.recoveryCount}`,
-    });
+    // Actually disable the redirect rule via API
+    const apiClient = new CloudflareAPIClient(
+      config.cloudflareApiToken,
+      config.zoneId,
+      config.accountId,
+      logger
+    );
+    
+    const success = await apiClient.updateRedirectRule(config.redirectRuleId, false);
+    
+    if (success) {
+      await stateManager.updateRedirectRuleState(
+        false,
+        'Simulated recovery - manually triggered via API'
+      );
+      await stateManager.resetCounters();
+      
+      return c.json({
+        success: true,
+        newRecoveryCount: 0,
+        message: 'Redirect rule disabled successfully',
+      });
+    } else {
+      await stateManager.incrementApiErrors();
+      return c.json({
+        success: false,
+        message: 'Failed to disable redirect rule via Cloudflare API',
+      }, 500);
+    }
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
