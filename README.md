@@ -25,6 +25,7 @@ The deploy button will:
 - **Maintenance Mode**: Support for manual and scheduled maintenance windows
 - **Persistent State**: Uses Cloudflare Durable Objects for state persistence across deployments
 - **Comprehensive API**: RESTful endpoints for monitoring and management
+- **Modern API Documentation**: Beautiful, interactive API docs powered by Scalar
 - **Rate Limiting**: 60 requests per minute per IP address
 - **Bearer Token Authentication**: Secure API access
 - **Prometheus Metrics**: Export metrics for monitoring integration
@@ -46,6 +47,7 @@ The deploy button will:
   - [Step 6: Verify Deployment](#step-6-verify-deployment)
 - [Configuration](#configuration)
 - [API Endpoints](#api-endpoints)
+  - [Interactive Documentation](#interactive-documentation)
 - [Development](#development)
 - [How It Works](#how-it-works)
 - [Monitoring & Observability](#monitoring--observability)
@@ -259,18 +261,22 @@ Expected response:
 }
 ```
 
-2. **Check monitoring status:**
+2. **Access interactive API documentation:**
+
+Visit `https://your-worker.your-subdomain.workers.dev/ui` in your browser to access the modern Scalar API documentation interface. You can test all endpoints directly from the UI!
+
+3. **Check monitoring status:**
 ```bash
 curl -H "Authorization: Bearer YOUR_API_TOKEN" \
   https://your-worker.your-subdomain.workers.dev/status
 ```
 
-3. **View logs:**
+4. **View logs:**
 ```bash
 wrangler tail
 ```
 
-4. **Test failover** (optional):
+5. **Test failover** (optional):
 ```bash
 curl -X POST \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
@@ -325,6 +331,26 @@ ZONE_ID = "your-zone-id"
 ```
 
 ## API Endpoints
+
+### Interactive Documentation
+
+The worker includes a beautiful, modern API documentation interface powered by [Scalar](https://scalar.com/).
+
+**Access the interactive docs:**
+- **Production**: `https://your-worker.your-subdomain.workers.dev/ui`
+- **Local Development**: `http://localhost:8787/ui`
+
+The Scalar UI provides:
+- ✨ Beautiful, modern interface with dark mode
+- 🔍 Advanced search functionality (press `k` for hotkey)
+- 💻 Auto-generated code examples in multiple languages (cURL, JavaScript, Python, etc.)
+- 🧪 Built-in API testing with authentication support
+- 📱 Fully responsive design
+- 📖 Complete endpoint documentation with request/response schemas
+
+> **Tip:** Use the interactive UI to test endpoints directly in your browser!
+
+### Authentication
 
 All endpoints (except `/health`) require Bearer token authentication:
 
@@ -558,6 +584,8 @@ npm run dev
 
 This starts a local server with hot reload at `http://localhost:8787`.
 
+**Access the interactive API documentation** at `http://localhost:8787/ui` to explore and test all endpoints!
+
 ### Available Scripts
 
 - `npm run dev` - Start local development server
@@ -566,7 +594,13 @@ This starts a local server with hot reload at `http://localhost:8787`.
 
 ### Testing Locally
 
-Test endpoints locally:
+**Option 1: Use the Interactive UI (Recommended)**
+
+Visit `http://localhost:8787/ui` and test all endpoints directly from the Scalar interface with built-in authentication and request builders!
+
+**Option 2: Use cURL**
+
+Test endpoints via command line:
 
 ```bash
 # Health check (no auth required)

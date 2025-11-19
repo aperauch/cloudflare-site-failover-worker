@@ -9,7 +9,7 @@
   "dependencies": {
     "@hono/standard-validator": "^0.1.5",
     "@hono/zod-openapi": "^0.18.3",
-    "@hono/swagger-ui": "^0.4.1",
+    "@scalar/hono-api-reference": "^0.9.24",
     "cloudflare": "^5.2.0",
     "hono": "^4.10.5",
     "zod": "^3.23.8"

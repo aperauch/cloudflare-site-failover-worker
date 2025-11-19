@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { swaggerUI } from '@hono/swagger-ui';
+import { apiReference } from '@scalar/hono-api-reference';
 import type { Env } from './types';
 import { Logger } from './logger';
 import { validateEnvironment, ValidationError } from './validation';
@@ -11,7 +11,7 @@ import { getOpenAPIApp } from './openapi-routes';
 // Create main app
 const app = new Hono<{ Bindings: Env }>();
 
-// Add CORS middleware to allow Swagger UI to make requests
+// Add CORS middleware to allow API documentation UI to make requests
 app.use('*', cors({
   origin: '*',
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -28,15 +28,18 @@ let validatedConfig: any = null;
 const apiApp = getOpenAPIApp();
 app.route('/', apiApp);
 
-// Set root path to show Swagger UI
+// Set up Scalar API Reference UI
 app.get(
   '/ui',
-  swaggerUI({
-    url: '/openapi.json',
-  })
+  apiReference({
+    theme: 'purple',
+    spec: {
+      url: '/openapi.json',
+    },
+  } as any)
 );
 
-// Redirect root to Swagger UI
+// Redirect root to API documentation
 app.get('/', (c) => c.redirect('/ui'));
 
 // Cron trigger handler
